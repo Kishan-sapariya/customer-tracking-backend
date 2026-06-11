@@ -1,0 +1,150 @@
+// ILL Customer Tracking System — Prisma schema
+// Hybrid storage: indexed queryable columns + lossless `details` JSON (PRD §6).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  id           String @id @default(uuid())
+  customerCode String @unique // e.g. ILL-00001 (atomic sequence)
+
+  // --- queryable / indexed core ---
+  company     String
+  contactName String?
+  phone       String?
+  email       String?
+  city        String?
+
+  customerType CustomerType // OLD | NEW
+  status       CustomerStatus // pipeline stage / COMPLETED / DISCONNECTED
+  isActive     Boolean        @default(true)
+  needsReview  Boolean        @default(false) // soft flag for migrated/old rows (PRD §12.12)
+
+  bandwidth String?
+  arcAmount Float?
+  otcAmount Float?
+
+  // --- new-customer pipeline milestones ---
+  deliveryDate    DateTime?
+  deliveryNotes   String?
+  billingCycle    BillingCycle?
+  billingDetails  Json?
+  ftbAmount       Float?
+  ftbReceivedDate DateTime?
+
+  // --- lifecycle ---
+  disconnectedAt   DateTime?
+  disconnectReason String?
+
+  // --- full captured snapshot ---
+  details Json
+
+  // --- audit ---
+  source      EntrySource
+  createdById String
+  createdBy   User        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  history CustomerHistory[]
+
+  @@index([customerType, status])
+  @@index([isActive])
+  @@index([customerType, isActive])
+  @@index([status])
+  @@index([company])
+  @@index([createdAt])
+}
+
+model CustomerHistory {
+  id            String        @id @default(uuid())
+  customerId    String
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  action        HistoryAction
+  oldValues     Json?
+  newValues     Json?
+  reason        String?
+  performedById String
+  performedBy   User          @relation("HistoryPerformedBy", fields: [performedById], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdCustomers Customer[]        @relation("CustomerCreatedBy")
+  performedHistory CustomerHistory[] @relation("HistoryPerformedBy")
+}
+
+// Master-editable system settings (cutoff date, theme defaults).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Atomic sequence counters (customer code generation).
+model Counter {
+  key   String @id
+  value Int    @default(0)
+}
+
+enum CustomerType {
+  OLD
+  NEW
+}
+
+enum CustomerStatus {
+  DELIVERY_PENDING
+  BILLING_PENDING
+  FTB_PENDING
+  COMPLETED
+  DISCONNECTED
+}
+
+enum BillingCycle {
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+enum EntrySource {
+  EXCEL
+  SINGLE
+}
+
+enum Role {
+  ACCOUNTS
+  DELIVERY
+  ADMIN
+  MASTER
+}
+
+enum HistoryAction {
+  CREATED
+  DELIVERY_SET
+  BILLING_SET
+  FTB_SET
+  UPGRADE
+  DOWNGRADE
+  RATE_REVISION
+  DISCONNECTION
+  RECONNECTION
+  EDIT
+}
