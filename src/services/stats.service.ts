@@ -68,9 +68,13 @@ export async function getArcTotals() {
 
 // Commercial changes (the lifecycle actions that move money). Count + ARC impact
 // per action type, computed from the append-only history (FR-5.2 / §12.13).
-export async function getCommercialChanges() {
+type Range = { from: Date; to: Date };
+
+async function commercialForRange(range?: Range) {
+  const where: any = { action: { in: ["UPGRADE", "DOWNGRADE", "RATE_REVISION"] } };
+  if (range) where.createdAt = { gte: range.from, lte: range.to };
   const rows = await prisma.customerHistory.findMany({
-    where: { action: { in: ["UPGRADE", "DOWNGRADE", "RATE_REVISION"] } },
+    where,
     select: { action: true, oldValues: true, newValues: true },
   });
 
@@ -91,21 +95,48 @@ export async function getCommercialChanges() {
       out.downgrade.count++;
       out.downgrade.amount += Math.max(0, oldArc - newArc); // revenue reduced
     } else if (r.action === "RATE_REVISION") {
-      // Rate revision changes bandwidth only — ARC stays the same, so there is
-      // no ARC amount to report (count only).
-      out.rateRevision.count++;
+      out.rateRevision.count++; // bandwidth only — no ARC amount
     }
   }
 
-  // Disconnection: ARC churned = the disconnected customers' ARC book.
+  // Disconnection: ARC churned. For a period, filter on disconnectedAt.
+  const discWhere: any = { status: "DISCONNECTED" };
+  if (range) discWhere.disconnectedAt = { gte: range.from, lte: range.to };
   const disc = await prisma.customer.aggregate({
-    where: { status: "DISCONNECTED" },
+    where: discWhere,
     _count: { _all: true },
     _sum: { arcAmount: true },
   });
   out.disconnection = { count: disc._count._all, amount: disc._sum.arcAmount ?? 0 };
 
   return out;
+}
+
+export async function getCommercialChanges() {
+  return commercialForRange(); // all-time
+}
+
+// Commercial changes bucketed by Indian fiscal quarter (FY starts 1 Apr) +
+// all-time, for the dashboard ARC-waterfall period selector.
+export async function getCommercialPeriods() {
+  const cutoff = await getCutoffDate();
+  const y = cutoff.getFullYear(); // FY start year
+  const end = (yr: number, m: number, d: number) => new Date(Date.UTC(yr, m, d, 23, 59, 59, 999));
+  const start = (yr: number, m: number, d: number) => new Date(Date.UTC(yr, m, d, 0, 0, 0, 0));
+  const ranges = {
+    q1: { from: start(y, 3, 1), to: end(y, 5, 30) }, // Apr–Jun
+    q2: { from: start(y, 6, 1), to: end(y, 8, 30) }, // Jul–Sep
+    q3: { from: start(y, 9, 1), to: end(y, 11, 31) }, // Oct–Dec
+    q4: { from: start(y + 1, 0, 1), to: end(y + 1, 2, 31) }, // Jan–Mar
+  };
+  const [all, q1, q2, q3, q4] = await Promise.all([
+    commercialForRange(),
+    commercialForRange(ranges.q1),
+    commercialForRange(ranges.q2),
+    commercialForRange(ranges.q3),
+    commercialForRange(ranges.q4),
+  ]);
+  return { all, q1, q2, q3, q4 };
 }
 
 // New customers per month for the trend chart (FR-6.3). Grouped in SQL.
