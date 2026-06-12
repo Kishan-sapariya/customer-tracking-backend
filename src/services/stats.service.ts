@@ -51,18 +51,44 @@ export async function getDashboardStats() {
   };
 }
 
-// ARC (Annual Recurring Charge) totals — overall + by type + active book.
+// ARC (Annual Recurring Charge) totals — current + by type + active book, plus
+// the "base" (original) ARC per type so the dashboard can show start → current.
 export async function getArcTotals() {
-  const [total, active, byType] = await Promise.all([
+  const [total, active, byType, histRows] = await Promise.all([
     prisma.customer.aggregate({ _sum: { arcAmount: true } }),
     prisma.customer.aggregate({ where: { isActive: true }, _sum: { arcAmount: true } }),
     prisma.customer.groupBy({ by: ["customerType"], _sum: { arcAmount: true } }),
+    // Upgrade/downgrade deltas, attributed to the customer's type.
+    prisma.customerHistory.findMany({
+      where: { action: { in: ["UPGRADE", "DOWNGRADE"] } },
+      select: { oldValues: true, newValues: true, customer: { select: { customerType: true } } },
+    }),
   ]);
+
+  const oldCur = byType.find((t) => t.customerType === "OLD")?._sum.arcAmount ?? 0;
+  const newCur = byType.find((t) => t.customerType === "NEW")?._sum.arcAmount ?? 0;
+
+  // current = original + Σ(newArc − oldArc) ⇒ original = current − Σ delta.
+  let deltaOld = 0;
+  let deltaNew = 0;
+  for (const r of histRows) {
+    const oldArc = Number((r.oldValues as any)?.arcAmount ?? 0);
+    const newArc = Number((r.newValues as any)?.arcAmount ?? 0);
+    const d = newArc - oldArc;
+    if (r.customer.customerType === "OLD") deltaOld += d;
+    else deltaNew += d;
+  }
+  const baseOld = oldCur - deltaOld;
+  const baseNew = newCur - deltaNew;
+
   return {
     total: total._sum.arcAmount ?? 0,
     active: active._sum.arcAmount ?? 0,
-    old: byType.find((t) => t.customerType === "OLD")?._sum.arcAmount ?? 0,
-    new: byType.find((t) => t.customerType === "NEW")?._sum.arcAmount ?? 0,
+    old: oldCur,
+    new: newCur,
+    baseTotal: baseOld + baseNew,
+    baseOld,
+    baseNew,
   };
 }
 
