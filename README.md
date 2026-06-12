@@ -39,6 +39,41 @@ npm run dev                 # http://localhost:5002
 - `npm run db:seed` — seed demo users
 - `npm run db:studio` — Prisma Studio
 
+## Docker (deployment)
+
+Everything is in this folder: `Dockerfile`, `.dockerignore`, `docker-entrypoint.sh`, `docker-compose.yml`.
+
+**One-command deploy (API + Postgres):**
+
+```bash
+# from backend/
+JWT_SECRET=your-long-secret POSTGRES_PASSWORD=your-db-pass \
+  docker compose up -d --build
+# → API on http://localhost:5002 (schema auto-synced on boot)
+
+# seed the demo users once (optional)
+docker compose exec api npm run db:seed
+```
+
+**Just the image** (bring your own database):
+
+```bash
+docker build -t ill-cts-backend .
+docker run -d -p 5002:5002 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/ill_cts?schema=public" \
+  -e JWT_SECRET="your-long-secret" \
+  -e CORS_ORIGIN="https://your-frontend.example.com" \
+  ill-cts-backend
+```
+
+Notes:
+- The entrypoint runs `prisma db push` on startup (idempotent). Set `AUTO_DB_PUSH=false`
+  to manage the schema yourself.
+- Runs as the non-root `node` user. Multi-stage build; Prisma client is generated
+  for the image's runtime.
+- Required env: `DATABASE_URL`, `JWT_SECRET`. Optional: `PORT` (5002), `CORS_ORIGIN`,
+  `JWT_EXPIRES_IN`, `CUTOFF_DATE`. See `.env.example`.
+
 ## Architecture notes
 
 - **Hybrid storage:** indexed columns for what we filter/count on, plus a lossless

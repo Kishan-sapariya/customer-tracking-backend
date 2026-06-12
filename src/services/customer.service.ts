@@ -139,6 +139,7 @@ function toColumns(input: CustomerInput) {
     phone: input.phone ?? null,
     email: input.email ?? null,
     city: input.city ?? input.circle ?? null,
+    username: input.username ?? null,
     bandwidth: input.bandwidth ?? null,
     arcAmount: input.arcAmount ?? null,
     otcAmount: input.otcAmount ?? null,
@@ -425,6 +426,7 @@ export async function listCustomers(q: ListQuery) {
       { phone: { contains: s, mode: "insensitive" } },
       { customerCode: { contains: s, mode: "insensitive" } },
       { email: { contains: s, mode: "insensitive" } },
+      { username: { contains: s, mode: "insensitive" } },
     ];
   }
 
@@ -603,7 +605,7 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
           customerId: id,
           action: "DISCONNECTION",
           oldValues: { isActive: true, status: c.status },
-          newValues: { isActive: false, status: "DISCONNECTED" } as Prisma.InputJsonValue,
+          newValues: { isActive: false, status: "DISCONNECTED", effectiveDate: body.effectiveDate ?? new Date() } as Prisma.InputJsonValue,
           reason: body.reason,
           performedById: user.id,
         },
@@ -624,7 +626,7 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
           customerId: id,
           action: "RECONNECTION",
           oldValues: { isActive: false, status: "DISCONNECTED" },
-          newValues: { isActive: true, status: "COMPLETED" } as Prisma.InputJsonValue,
+          newValues: { isActive: true, status: "COMPLETED", effectiveDate: body.effectiveDate ?? new Date() } as Prisma.InputJsonValue,
           reason: body.reason,
           performedById: user.id,
         },
@@ -651,7 +653,11 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
         customerId: id,
         action: actionToHistory[body.action],
         oldValues: { arcAmount: c.arcAmount, bandwidth: c.bandwidth },
-        newValues: { arcAmount: updated.arcAmount, bandwidth: updated.bandwidth } as Prisma.InputJsonValue,
+        newValues: {
+          arcAmount: updated.arcAmount,
+          bandwidth: updated.bandwidth,
+          effectiveDate: body.effectiveDate ?? new Date(),
+        } as Prisma.InputJsonValue,
         reason: body.reason,
         performedById: user.id,
       },

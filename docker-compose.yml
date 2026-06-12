@@ -1,0 +1,39 @@
+# One-command self-hosted deploy: Postgres + the ILL CTS API.
+#   docker compose up -d --build
+# Override secrets via a .env file or the shell (e.g. JWT_SECRET, POSTGRES_PASSWORD).
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ill}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ill_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ill_cts}
+    volumes:
+      - ill_cts_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ill} -d ${POSTGRES_DB:-ill_cts}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ill}:${POSTGRES_PASSWORD:-ill_password}@db:5432/${POSTGRES_DB:-ill_cts}?schema=public
+      PORT: 5002
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3007}
+      CUTOFF_DATE: ${CUTOFF_DATE:-2026-04-01}
+      AUTO_DB_PUSH: "true"
+    ports:
+      - "5002:5002"
+
+volumes:
+  ill_cts_db:

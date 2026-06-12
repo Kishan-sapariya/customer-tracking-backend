@@ -20,6 +20,7 @@ model Customer {
   phone       String?
   email       String?
   city        String?
+  username    String? // customer login username (searchable)
 
   customerType CustomerType // OLD | NEW
   status       CustomerStatus // pipeline stage / COMPLETED / DISCONNECTED
@@ -59,6 +60,7 @@ model Customer {
   @@index([customerType, isActive])
   @@index([status])
   @@index([company])
+  @@index([username])
   @@index([createdAt])
 }
 
