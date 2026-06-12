@@ -292,6 +292,11 @@ export async function bulkImport(
         });
       }
     }
+  }, {
+    // Large imports (hundreds/thousands of rows) far exceed Prisma's default
+    // 5s interactive-transaction timeout, so raise it for the whole batch.
+    maxWait: 30_000,
+    timeout: 600_000, // up to 10 minutes for very large sheets
   });
 
   return result;
