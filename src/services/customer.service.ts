@@ -418,6 +418,10 @@ export async function listCustomers(q: ListQuery) {
   if (q.status) where.status = q.status;
   if (q.active) where.isActive = q.active === "true";
   if (q.needsReview) where.needsReview = q.needsReview === "true";
+  // SAM lives inside the `details` JSON, not a column — match on the JSON path.
+  if (q.sam) {
+    where.details = { path: ["sam", "samExecutiveName"], equals: q.sam };
+  }
   if (q.dateFrom || q.dateTo) {
     where.createdAt = {};
     if (q.dateFrom) where.createdAt.gte = q.dateFrom;
@@ -454,6 +458,18 @@ export async function listCustomers(q: ListQuery) {
       totalPages: Math.ceil(total / q.pageSize),
     },
   };
+}
+
+// Distinct SAM Executive names for the filter dropdown. Reads the JSON path
+// directly (Prisma can't `distinct` on a JSON sub-field), skipping blanks.
+export async function listDistinctSams(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ sam: string }[]>`
+    SELECT DISTINCT "details"->'sam'->>'samExecutiveName' AS sam
+    FROM "Customer"
+    WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
+    ORDER BY sam ASC
+  `;
+  return rows.map((r) => r.sam);
 }
 
 export async function getCustomer(id: string) {

@@ -213,6 +213,7 @@ export const listQuerySchema = z.object({
   status: CustomerStatusEnum.optional(),
   active: z.enum(["true", "false"]).optional(),
   needsReview: z.enum(["true", "false"]).optional(),
+  sam: z.string().optional(), // exact SAM Executive name (details.sam.samExecutiveName)
   dateFrom: z.coerce.date().optional(),
   dateTo: z.coerce.date().optional(),
   sortBy: z.enum(["createdAt", "company", "customerCode", "arcAmount", "status"]).default("createdAt"),

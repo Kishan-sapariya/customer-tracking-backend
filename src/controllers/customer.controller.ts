@@ -27,6 +27,12 @@ export const exportAll = asyncHandler(async (req, res) => {
   res.json({ items, pagination: { total: items.length } });
 });
 
+// GET /api/customers/sams — distinct SAM Executive names for the filter dropdown
+export const sams = asyncHandler(async (_req, res) => {
+  const items = await svc.listDistinctSams();
+  res.json({ items });
+});
+
 // GET /api/changes — commercial-change report (ARC-change audit, all roles)
 const changesQuerySchema = z.object({
   action: z.enum(["UPGRADE", "DOWNGRADE", "RATE_REVISION", "DISCONNECTION"]).optional(),

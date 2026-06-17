@@ -20,6 +20,7 @@ router.get("/stats", authenticate, stats.dashboard);
 // Read (all roles)
 router.get("/customers", authenticate, customers.list);
 router.get("/customers/export", authenticate, customers.exportAll);
+router.get("/customers/sams", authenticate, customers.sams); // distinct SAM names (must precede :id)
 router.get("/changes", authenticate, customers.changes);
 router.get("/customers/:id", authenticate, customers.detail);
 
