@@ -626,7 +626,7 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
           customerId: id,
           action: "DISCONNECTION",
           oldValues: { isActive: true, status: c.status },
-          newValues: { isActive: false, status: "DISCONNECTED", effectiveDate: body.effectiveDate ?? new Date() } as Prisma.InputJsonValue,
+          newValues: { isActive: false, status: "DISCONNECTED", effectiveDate: body.effectiveDate ?? new Date(), mailReceivedDate: body.mailReceivedDate ?? null } as Prisma.InputJsonValue,
           reason: body.reason,
           performedById: user.id,
         },
@@ -647,7 +647,7 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
           customerId: id,
           action: "RECONNECTION",
           oldValues: { isActive: false, status: "DISCONNECTED" },
-          newValues: { isActive: true, status: "COMPLETED", effectiveDate: body.effectiveDate ?? new Date() } as Prisma.InputJsonValue,
+          newValues: { isActive: true, status: "COMPLETED", effectiveDate: body.effectiveDate ?? new Date(), mailReceivedDate: body.mailReceivedDate ?? null } as Prisma.InputJsonValue,
           reason: body.reason,
           performedById: user.id,
         },
@@ -678,6 +678,7 @@ export async function lifecycleAction(id: string, body: LifecycleActionInput, us
           arcAmount: updated.arcAmount,
           bandwidth: updated.bandwidth,
           effectiveDate: body.effectiveDate ?? new Date(),
+          mailReceivedDate: body.mailReceivedDate ?? null,
         } as Prisma.InputJsonValue,
         reason: body.reason,
         performedById: user.id,
@@ -743,7 +744,9 @@ export async function listCommercialChanges(q: { action?: HistoryAction; page: n
       skip: (q.page - 1) * q.pageSize,
       take: q.pageSize,
       include: {
-        customer: { select: { id: true, customerCode: true, company: true, arcAmount: true } },
+        // `details` carries the circuit id (details.service.circuitId) the
+        // commercial-changes export needs as its customer key.
+        customer: { select: { id: true, customerCode: true, company: true, arcAmount: true, details: true } },
         performedBy: { select: { name: true, role: true } },
       },
     }),

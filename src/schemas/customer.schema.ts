@@ -203,6 +203,7 @@ export const lifecycleActionSchema = z.object({
   newArcAmount: z.number().nonnegative().optional(),
   reason: z.string().optional(),
   effectiveDate: z.coerce.date().optional(),
+  mailReceivedDate: z.coerce.date().optional(), // date the customer's approval mail arrived
 });
 export type LifecycleActionInput = z.infer<typeof lifecycleActionSchema>;
 
