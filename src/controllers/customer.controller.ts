@@ -9,6 +9,7 @@ import {
   lifecycleActionSchema,
   listQuerySchema,
   customerInputSchema,
+  editChangeSchema,
 } from "../schemas/customer.schema.js";
 import * as svc from "../services/customer.service.js";
 import type { CustomerType } from "@prisma/client";
@@ -46,6 +47,13 @@ export const changes = asyncHandler(async (req, res) => {
   const q = changesQuerySchema.parse(req.query);
   const { items, pagination } = await svc.listCommercialChanges(q);
   res.json({ items, pagination });
+});
+
+// PATCH /api/changes/:id — edit a recorded commercial change (Accounts / Master)
+export const editChange = asyncHandler(async (req, res) => {
+  const body = editChangeSchema.parse(req.body);
+  const updated = await svc.editCommercialChange(req.params.id, body, req.user!);
+  res.json({ message: "Change updated", data: updated });
 });
 
 // GET /api/customers/:id

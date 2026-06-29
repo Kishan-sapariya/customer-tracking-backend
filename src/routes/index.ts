@@ -31,6 +31,7 @@ router.post("/customers/new", authenticate, writers, customers.createNew);
 router.post("/customers/:type/preview", authenticate, writers, customers.preview);
 router.post("/customers/:type/import", authenticate, writers, customers.bulkImport);
 router.put("/customers/:id", authenticate, writers, customers.edit);
+router.patch("/changes/:id", authenticate, writers, customers.editChange);
 
 // Pipeline: delivery (Delivery, Accounts, Master); billing/ftb (Accounts, Master)
 router.post(

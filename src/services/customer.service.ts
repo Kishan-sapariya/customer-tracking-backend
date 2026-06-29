@@ -763,3 +763,77 @@ export async function listCommercialChanges(q: { action?: HistoryAction; dateFro
     pagination: { page: q.page, pageSize: q.pageSize, total, totalPages: Math.ceil(total / q.pageSize) },
   };
 }
+
+// ── Edit a recorded commercial change (correct a mistake) ────────────────────
+// Updates the history record's snapshot in place. When the change is the
+// customer's MOST RECENT arc/bandwidth-affecting change, the customer's live
+// arcAmount / bandwidth are synced too (Accounts & Master only — FR-5).
+const ARC_ACTIONS = ["UPGRADE", "DOWNGRADE"] as const; // actions that move ARC
+const BW_ACTIONS = ["UPGRADE", "DOWNGRADE", "RATE_REVISION"] as const; // actions that move bandwidth
+
+export interface EditChangeInput {
+  newArcAmount?: number;
+  newBandwidth?: string;
+  effectiveDate?: Date;
+  mailReceivedDate?: Date;
+  reason?: string;
+}
+
+export async function editCommercialChange(id: string, body: EditChangeInput, user: AuthUser) {
+  const entry = await prisma.customerHistory.findUnique({ where: { id } });
+  if (!entry) throw ApiError.notFound("Change not found");
+  if (!(COMMERCIAL_ACTIONS as readonly string[]).includes(entry.action)) {
+    throw ApiError.badRequest("Only commercial changes can be edited");
+  }
+
+  const prev = (entry.newValues as Record<string, unknown>) ?? {};
+  const isArc = (ARC_ACTIONS as readonly string[]).includes(entry.action);
+  const isBw = (BW_ACTIONS as readonly string[]).includes(entry.action);
+
+  // Merge edits into the stored snapshot (only fields valid for this action).
+  const newValues: Record<string, unknown> = { ...prev };
+  if (isArc && body.newArcAmount !== undefined) newValues.arcAmount = body.newArcAmount;
+  if (isBw && body.newBandwidth !== undefined) newValues.bandwidth = body.newBandwidth;
+  if (body.effectiveDate !== undefined) newValues.effectiveDate = body.effectiveDate;
+  if (body.mailReceivedDate !== undefined) newValues.mailReceivedDate = body.mailReceivedDate;
+
+  return prisma.$transaction(async (tx) => {
+    await tx.customerHistory.update({
+      where: { id },
+      data: {
+        newValues: newValues as Prisma.InputJsonValue,
+        ...(body.reason !== undefined ? { reason: body.reason || null } : {}),
+      },
+    });
+
+    // Sync the customer's live values only if this is the latest such change.
+    const data: Prisma.CustomerUpdateInput = {};
+    if (isArc && body.newArcAmount !== undefined) {
+      const latestArc = await tx.customerHistory.findFirst({
+        where: { customerId: entry.customerId, action: { in: ARC_ACTIONS as unknown as HistoryAction[] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latestArc?.id === id) data.arcAmount = body.newArcAmount;
+    }
+    if (isBw && body.newBandwidth !== undefined) {
+      const latestBw = await tx.customerHistory.findFirst({
+        where: { customerId: entry.customerId, action: { in: BW_ACTIONS as unknown as HistoryAction[] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latestBw?.id === id) data.bandwidth = body.newBandwidth;
+    }
+    if (Object.keys(data).length > 0) {
+      await tx.customer.update({ where: { id: entry.customerId }, data });
+    }
+
+    return tx.customerHistory.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { id: true, customerCode: true, company: true, arcAmount: true, details: true } },
+        performedBy: { select: { name: true, role: true } },
+      },
+    });
+  });
+}

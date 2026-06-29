@@ -207,6 +207,16 @@ export const lifecycleActionSchema = z.object({
 });
 export type LifecycleActionInput = z.infer<typeof lifecycleActionSchema>;
 
+// Edit a recorded commercial change — correct ARC / bandwidth / dates / note.
+export const editChangeSchema = z.object({
+  newBandwidth: z.string().optional(),
+  newArcAmount: z.number().nonnegative().optional(),
+  reason: z.string().optional(),
+  effectiveDate: z.coerce.date().optional(),
+  mailReceivedDate: z.coerce.date().optional(),
+});
+export type EditChangeInput = z.infer<typeof editChangeSchema>;
+
 // List query params (search/filter/sort/paginate — FR-4.2).
 export const listQuerySchema = z.object({
   search: z.string().optional(),
