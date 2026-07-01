@@ -837,3 +837,61 @@ export async function editCommercialChange(id: string, body: EditChangeInput, us
     });
   });
 }
+
+// ── Delete a recorded commercial change (Admin & Master only) ────────────────
+// When the change is the customer's most recent one of its kind, the customer's
+// live state is reverted to the pre-change (old) values: ARC/bandwidth for
+// upgrade/downgrade/rate-revision, and reactivation for a disconnection.
+export async function deleteCommercialChange(id: string, _user: AuthUser) {
+  const entry = await prisma.customerHistory.findUnique({ where: { id } });
+  if (!entry) throw ApiError.notFound("Change not found");
+  if (!(COMMERCIAL_ACTIONS as readonly string[]).includes(entry.action)) {
+    throw ApiError.badRequest("Only commercial changes can be deleted");
+  }
+
+  const old = (entry.oldValues as Record<string, unknown>) ?? {};
+  const isArc = (ARC_ACTIONS as readonly string[]).includes(entry.action);
+  const isBw = (BW_ACTIONS as readonly string[]).includes(entry.action);
+
+  return prisma.$transaction(async (tx) => {
+    const data: Prisma.CustomerUpdateInput = {};
+
+    if (isArc && old.arcAmount !== undefined) {
+      const latestArc = await tx.customerHistory.findFirst({
+        where: { customerId: entry.customerId, action: { in: ARC_ACTIONS as unknown as HistoryAction[] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latestArc?.id === id) data.arcAmount = Number(old.arcAmount);
+    }
+    if (isBw && old.bandwidth !== undefined) {
+      const latestBw = await tx.customerHistory.findFirst({
+        where: { customerId: entry.customerId, action: { in: BW_ACTIONS as unknown as HistoryAction[] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latestBw?.id === id) data.bandwidth = String(old.bandwidth);
+    }
+    if (entry.action === "DISCONNECTION") {
+      const customer = await tx.customer.findUnique({ where: { id: entry.customerId }, select: { isActive: true } });
+      const latestDisc = await tx.customerHistory.findFirst({
+        where: { customerId: entry.customerId, action: "DISCONNECTION" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      // Only reactivate if the customer is still disconnected by *this* change.
+      if (customer && !customer.isActive && latestDisc?.id === id) {
+        data.isActive = true;
+        data.status = "COMPLETED";
+        data.disconnectedAt = null;
+        data.disconnectReason = null;
+      }
+    }
+
+    if (Object.keys(data).length > 0) {
+      await tx.customer.update({ where: { id: entry.customerId }, data });
+    }
+    await tx.customerHistory.delete({ where: { id } });
+    return { id };
+  });
+}

@@ -56,6 +56,12 @@ export const editChange = asyncHandler(async (req, res) => {
   res.json({ message: "Change updated", data: updated });
 });
 
+// DELETE /api/changes/:id — delete a recorded commercial change (Admin / Master)
+export const deleteChange = asyncHandler(async (req, res) => {
+  await svc.deleteCommercialChange(req.params.id, req.user!);
+  res.json({ message: "Change deleted" });
+});
+
 // GET /api/customers/:id
 export const detail = asyncHandler(async (req, res) => {
   const customer = await svc.getCustomer(req.params.id);
