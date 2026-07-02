@@ -744,7 +744,7 @@ export async function listCommercialChanges(q: { action?: HistoryAction; type?: 
     if (q.dateFrom) where.createdAt.gte = q.dateFrom;
     if (q.dateTo) where.createdAt.lte = q.dateTo;
   }
-  const [items, total] = await Promise.all([
+  const [items, total, summaryRows] = await Promise.all([
     prisma.customerHistory.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -758,10 +758,29 @@ export async function listCommercialChanges(q: { action?: HistoryAction; type?: 
       },
     }),
     prisma.customerHistory.count({ where }),
+    // All matching rows (minimal) to total the ARC impact across the filter.
+    prisma.customerHistory.findMany({
+      where,
+      select: { action: true, oldValues: true, newValues: true, customer: { select: { arcAmount: true } } },
+    }),
   ]);
+
+  // ARC impact of the filtered set: upgrades add, downgrades/disconnections
+  // subtract, rate revisions are neutral. Matches the per-row figures shown.
+  let gained = 0, reduced = 0, churned = 0;
+  for (const r of summaryRows) {
+    const oldArc = Number((r.oldValues as any)?.arcAmount ?? 0);
+    const newArc = Number((r.newValues as any)?.arcAmount ?? 0);
+    if (r.action === "UPGRADE") gained += Math.max(0, newArc - oldArc);
+    else if (r.action === "DOWNGRADE") reduced += Math.max(0, oldArc - newArc);
+    else if (r.action === "DISCONNECTION") churned += r.customer?.arcAmount ?? 0;
+  }
+  const summary = { count: total, gained, reduced, churned, netArc: gained - reduced - churned };
+
   return {
     items,
     pagination: { page: q.page, pageSize: q.pageSize, total, totalPages: Math.ceil(total / q.pageSize) },
+    summary,
   };
 }
 

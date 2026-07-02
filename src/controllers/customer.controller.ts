@@ -46,8 +46,8 @@ const changesQuerySchema = z.object({
 
 export const changes = asyncHandler(async (req, res) => {
   const q = changesQuerySchema.parse(req.query);
-  const { items, pagination } = await svc.listCommercialChanges(q);
-  res.json({ items, pagination });
+  const { items, pagination, summary } = await svc.listCommercialChanges(q);
+  res.json({ items, pagination, summary });
 });
 
 // PATCH /api/changes/:id — edit a recorded commercial change (Accounts / Master)
