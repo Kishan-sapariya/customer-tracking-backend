@@ -733,10 +733,11 @@ export async function listAllForExport(q: ListQuery) {
 // ── Commercial changes report (ARC-change audit, PRD §12.13) ─────────────────
 const COMMERCIAL_ACTIONS = ["UPGRADE", "DOWNGRADE", "RATE_REVISION", "DISCONNECTION"] as const;
 
-export async function listCommercialChanges(q: { action?: HistoryAction; dateFrom?: Date; dateTo?: Date; page: number; pageSize: number }) {
+export async function listCommercialChanges(q: { action?: HistoryAction; type?: "OLD" | "NEW"; dateFrom?: Date; dateTo?: Date; page: number; pageSize: number }) {
   const where: Prisma.CustomerHistoryWhereInput = {
     action: q.action ? q.action : { in: COMMERCIAL_ACTIONS as unknown as HistoryAction[] },
   };
+  if (q.type) where.customer = { customerType: q.type }; // filter by the customer's type
   // Filter by when the change was recorded (createdAt).
   if (q.dateFrom || q.dateTo) {
     where.createdAt = {};

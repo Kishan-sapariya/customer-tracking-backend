@@ -37,6 +37,7 @@ export const sams = asyncHandler(async (_req, res) => {
 // GET /api/changes — commercial-change report (ARC-change audit, all roles)
 const changesQuerySchema = z.object({
   action: z.enum(["UPGRADE", "DOWNGRADE", "RATE_REVISION", "DISCONNECTION"]).optional(),
+  type: z.enum(["OLD", "NEW"]).optional(),
   dateFrom: z.coerce.date().optional(),
   dateTo: z.coerce.date().optional(),
   page: z.coerce.number().int().min(1).default(1),

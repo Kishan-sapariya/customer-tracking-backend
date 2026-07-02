@@ -96,9 +96,10 @@ export async function getArcTotals() {
 // per action type, computed from the append-only history (FR-5.2 / §12.13).
 type Range = { from: Date; to: Date };
 
-async function commercialForRange(range?: Range) {
+async function commercialForRange(range?: Range, type?: "OLD" | "NEW") {
   const where: any = { action: { in: ["UPGRADE", "DOWNGRADE", "RATE_REVISION"] } };
   if (range) where.createdAt = { gte: range.from, lte: range.to };
+  if (type) where.customer = { customerType: type }; // attribute to the customer's type
   const rows = await prisma.customerHistory.findMany({
     where,
     select: { action: true, oldValues: true, newValues: true },
@@ -128,6 +129,7 @@ async function commercialForRange(range?: Range) {
   // Disconnection: ARC churned. For a period, filter on disconnectedAt.
   const discWhere: any = { status: "DISCONNECTED" };
   if (range) discWhere.disconnectedAt = { gte: range.from, lte: range.to };
+  if (type) discWhere.customerType = type;
   const disc = await prisma.customer.aggregate({
     where: discWhere,
     _count: { _all: true },
@@ -140,6 +142,16 @@ async function commercialForRange(range?: Range) {
 
 export async function getCommercialChanges() {
   return commercialForRange(); // all-time
+}
+
+// All-time commercial changes split by customer type (for the dashboard's
+// New-customers / Old-customers breakdown rows).
+export async function getCommercialByType() {
+  const [neu, old] = await Promise.all([
+    commercialForRange(undefined, "NEW"),
+    commercialForRange(undefined, "OLD"),
+  ]);
+  return { new: neu, old };
 }
 
 // Commercial changes bucketed by Indian fiscal quarter (FY starts 1 Apr) +
