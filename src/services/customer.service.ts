@@ -419,8 +419,11 @@ export async function listCustomers(q: ListQuery) {
   if (q.active) where.isActive = q.active === "true";
   if (q.needsReview) where.needsReview = q.needsReview === "true";
   // SAM lives inside the `details` JSON, not a column — match on the JSON path.
+  // Match by FIRST name, case-insensitively, so every spelling variant of a SAM
+  // (e.g. "Devendra" and "Devendra Shinde") is included.
   if (q.sam) {
-    where.details = { path: ["sam", "samExecutiveName"], equals: q.sam };
+    const firstName = q.sam.trim().split(/\s+/)[0];
+    where.details = { path: ["sam", "samExecutiveName"], string_starts_with: firstName, mode: "insensitive" };
   }
   if (q.dateFrom || q.dateTo) {
     where.createdAt = {};
@@ -460,20 +463,52 @@ export async function listCustomers(q: ListQuery) {
   };
 }
 
-// Distinct SAM Executive names for the filter dropdown. Reads the JSON path
-// directly (Prisma can't `distinct` on a JSON sub-field), skipping blanks.
+// ── SAM name normalization ───────────────────────────────────────────────────
+// The same SAM is entered inconsistently (case differences, first-name only vs
+// first + last name). We group everyone by their FIRST name, case-insensitive,
+// so "devendra", "Devendra" and "Devendra Shinde" all collapse into one SAM.
+export function samKey(name: string): string {
+  return (name.trim().split(/\s+/)[0] ?? "").toLowerCase();
+}
+function titleCase(s: string): string {
+  return s
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(" ");
+}
+// The canonical label for a group of variant spellings: the fullest name (most
+// words, then longest), title-cased — e.g. picks "Devendra Shinde" over "devendra".
+function canonicalSam(variants: string[]): string {
+  const best = variants
+    .slice()
+    .sort((a, b) => {
+      const ta = a.trim().split(/\s+/).length;
+      const tb = b.trim().split(/\s+/).length;
+      if (tb !== ta) return tb - ta;
+      return b.trim().length - a.trim().length;
+    })[0];
+  return titleCase(best);
+}
+
+// Distinct SAM Executive names for the filter dropdown — grouped by first name
+// so each real SAM appears once. Reads the JSON path directly, skipping blanks.
 export async function listDistinctSams(): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ sam: string }[]>`
     SELECT DISTINCT "details"->'sam'->>'samExecutiveName' AS sam
     FROM "Customer"
     WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
-    ORDER BY sam ASC
   `;
-  return rows.map((r) => r.sam);
+  const groups = new Map<string, string[]>();
+  for (const r of rows) {
+    const key = samKey(r.sam);
+    groups.set(key, [...(groups.get(key) ?? []), r.sam]);
+  }
+  return [...groups.values()].map(canonicalSam).sort((a, b) => a.localeCompare(b));
 }
 
-// SAM-wise breakdown: for each SAM Executive, how many customers are linked and
-// their total / active ARC. Aggregated in SQL over the JSON path.
+// SAM-wise breakdown: per SAM Executive, how many customers are linked and their
+// total / active ARC. Aggregated in SQL per raw name, then merged by first name.
 export async function listSamBreakdown() {
   const rows = await prisma.$queryRaw<
     { sam: string; customers: bigint; active: bigint; arc: number; activeArc: number }[]
@@ -487,15 +522,26 @@ export async function listSamBreakdown() {
     FROM "Customer"
     WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
     GROUP BY 1
-    ORDER BY customers DESC, sam ASC
   `;
-  return rows.map((r) => ({
-    sam: r.sam,
-    customers: Number(r.customers),
-    active: Number(r.active),
-    arc: r.arc,
-    activeArc: r.activeArc,
-  }));
+
+  const groups = new Map<
+    string,
+    { variants: string[]; customers: number; active: number; arc: number; activeArc: number }
+  >();
+  for (const r of rows) {
+    const key = samKey(r.sam);
+    const g = groups.get(key) ?? { variants: [], customers: 0, active: 0, arc: 0, activeArc: 0 };
+    g.variants.push(r.sam);
+    g.customers += Number(r.customers);
+    g.active += Number(r.active);
+    g.arc += r.arc;
+    g.activeArc += r.activeArc;
+    groups.set(key, g);
+  }
+
+  return [...groups.values()]
+    .map((g) => ({ sam: canonicalSam(g.variants), customers: g.customers, active: g.active, arc: g.arc, activeArc: g.activeArc }))
+    .sort((a, b) => b.customers - a.customers || a.sam.localeCompare(b.sam));
 }
 
 export async function getCustomer(id: string) {
