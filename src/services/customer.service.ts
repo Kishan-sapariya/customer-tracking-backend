@@ -514,14 +514,20 @@ export async function listDistinctSams(): Promise<string[]> {
 export async function listSamBreakdown() {
   const [custRows, histRows] = await Promise.all([
     prisma.$queryRaw<
-      { sam: string; customers: bigint; active: bigint; newCustomers: bigint; arc: number; activeArc: number }[]
+      {
+        sam: string; customers: bigint; active: bigint; oldCustomers: bigint; newCustomers: bigint;
+        arc: number; oldArc: number; newArc: number; activeArc: number;
+      }[]
     >`
       SELECT
         "details"->'sam'->>'samExecutiveName' AS sam,
         COUNT(*)::bigint AS customers,
         COUNT(*) FILTER (WHERE "isActive")::bigint AS active,
+        COUNT(*) FILTER (WHERE "customerType" = 'OLD')::bigint AS "oldCustomers",
         COUNT(*) FILTER (WHERE "customerType" = 'NEW')::bigint AS "newCustomers",
         COALESCE(SUM("arcAmount"), 0)::double precision AS arc,
+        COALESCE(SUM("arcAmount") FILTER (WHERE "customerType" = 'OLD'), 0)::double precision AS "oldArc",
+        COALESCE(SUM("arcAmount") FILTER (WHERE "customerType" = 'NEW'), 0)::double precision AS "newArc",
         COALESCE(SUM("arcAmount") FILTER (WHERE "isActive"), 0)::double precision AS "activeArc"
       FROM "Customer"
       WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
@@ -546,14 +552,16 @@ export async function listSamBreakdown() {
 
   interface Group {
     variants: string[];
-    customers: number; active: number; newCustomers: number; arc: number; activeArc: number;
+    customers: number; active: number; oldCustomers: number; newCustomers: number;
+    arc: number; oldArc: number; newArc: number; activeArc: number;
     upgrade: { count: number; amount: number };
     downgrade: { count: number; amount: number };
     rateRevision: { count: number };
     disconnection: { count: number; amount: number };
   }
   const blank = (): Group => ({
-    variants: [], customers: 0, active: 0, newCustomers: 0, arc: 0, activeArc: 0,
+    variants: [], customers: 0, active: 0, oldCustomers: 0, newCustomers: 0,
+    arc: 0, oldArc: 0, newArc: 0, activeArc: 0,
     upgrade: { count: 0, amount: 0 }, downgrade: { count: 0, amount: 0 },
     rateRevision: { count: 0 }, disconnection: { count: 0, amount: 0 },
   });
@@ -570,8 +578,11 @@ export async function listSamBreakdown() {
     g.variants.push(r.sam);
     g.customers += Number(r.customers);
     g.active += Number(r.active);
+    g.oldCustomers += Number(r.oldCustomers);
     g.newCustomers += Number(r.newCustomers);
     g.arc += r.arc;
+    g.oldArc += r.oldArc;
+    g.newArc += r.newArc;
     g.activeArc += r.activeArc;
   }
 
@@ -588,8 +599,8 @@ export async function listSamBreakdown() {
   return [...groups.values()]
     .map((g) => ({
       sam: canonicalSam(g.variants),
-      customers: g.customers, active: g.active, newCustomers: g.newCustomers,
-      arc: g.arc, activeArc: g.activeArc,
+      customers: g.customers, active: g.active, oldCustomers: g.oldCustomers, newCustomers: g.newCustomers,
+      arc: g.arc, oldArc: g.oldArc, newArc: g.newArc, activeArc: g.activeArc,
       upgrade: g.upgrade, downgrade: g.downgrade, rateRevision: g.rateRevision, disconnection: g.disconnection,
     }))
     .sort((a, b) => b.customers - a.customers || a.sam.localeCompare(b.sam));
