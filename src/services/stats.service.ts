@@ -97,13 +97,24 @@ export async function getArcTotals() {
 // per action type, computed from the append-only history (FR-5.2 / §12.13).
 type Range = { from: Date; to: Date };
 
+// The business date a change belongs to: its effective date (falling back to
+// when it was recorded). Quarters are bucketed on this, not on createdAt, so a
+// change entered late but effective in an earlier quarter lands correctly.
+function effectiveOf(newValues: unknown, createdAt: Date): Date {
+  const s = (newValues as any)?.effectiveDate;
+  if (s) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return createdAt;
+}
+
 async function commercialForRange(range?: Range, type?: "OLD" | "NEW") {
   const where: any = { action: { in: ["UPGRADE", "DOWNGRADE", "RATE_REVISION"] } };
-  if (range) where.createdAt = { gte: range.from, lte: range.to };
   if (type) where.customer = { customerType: type }; // attribute to the customer's type
   const rows = await prisma.customerHistory.findMany({
     where,
-    select: { action: true, oldValues: true, newValues: true },
+    select: { action: true, oldValues: true, newValues: true, createdAt: true },
   });
 
   const out = {
@@ -114,6 +125,11 @@ async function commercialForRange(range?: Range, type?: "OLD" | "NEW") {
   };
 
   for (const r of rows) {
+    // Bucket by effective date so quarters reflect when the change takes effect.
+    if (range) {
+      const eff = effectiveOf(r.newValues, r.createdAt);
+      if (eff < range.from || eff > range.to) continue;
+    }
     const oldArc = Number((r.oldValues as any)?.arcAmount ?? 0);
     const newArc = Number((r.newValues as any)?.arcAmount ?? 0);
     if (r.action === "UPGRADE") {
