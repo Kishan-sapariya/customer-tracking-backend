@@ -23,7 +23,8 @@ export async function getDashboardStats() {
     prisma.customer.count({ where: { customerType: "NEW", status: "DELIVERY_PENDING" } }),
     prisma.customer.count({ where: { customerType: "NEW", status: "BILLING_PENDING" } }),
     prisma.customer.count({ where: { customerType: "NEW", status: "FTB_PENDING" } }),
-    prisma.customer.count({ where: { status: "COMPLETED" } }),
+    // Pipeline "Completed" = NEW customers whose FTB is done (not old auto-completed).
+    prisma.customer.count({ where: { customerType: "NEW", status: "COMPLETED" } }),
   ]);
 
   // Data-health: records missing key fields (PRD §12.10).
