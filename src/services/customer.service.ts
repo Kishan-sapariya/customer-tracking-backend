@@ -507,40 +507,91 @@ export async function listDistinctSams(): Promise<string[]> {
   return [...groups.values()].map(canonicalSam).sort((a, b) => a.localeCompare(b));
 }
 
-// SAM-wise breakdown: per SAM Executive, how many customers are linked and their
-// total / active ARC. Aggregated in SQL per raw name, then merged by first name.
+// SAM-wise breakdown: per SAM Executive, the customers linked to them (total /
+// active / new), their total & active ARC, and their commercial-change activity
+// (upgrade / downgrade / disconnection with ARC impact; rate revision count
+// only). Aggregated per raw name, then merged by first name.
 export async function listSamBreakdown() {
-  const rows = await prisma.$queryRaw<
-    { sam: string; customers: bigint; active: bigint; arc: number; activeArc: number }[]
-  >`
-    SELECT
-      "details"->'sam'->>'samExecutiveName' AS sam,
-      COUNT(*)::bigint AS customers,
-      COUNT(*) FILTER (WHERE "isActive")::bigint AS active,
-      COALESCE(SUM("arcAmount"), 0)::double precision AS arc,
-      COALESCE(SUM("arcAmount") FILTER (WHERE "isActive"), 0)::double precision AS "activeArc"
-    FROM "Customer"
-    WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
-    GROUP BY 1
-  `;
+  const [custRows, histRows] = await Promise.all([
+    prisma.$queryRaw<
+      { sam: string; customers: bigint; active: bigint; newCustomers: bigint; arc: number; activeArc: number }[]
+    >`
+      SELECT
+        "details"->'sam'->>'samExecutiveName' AS sam,
+        COUNT(*)::bigint AS customers,
+        COUNT(*) FILTER (WHERE "isActive")::bigint AS active,
+        COUNT(*) FILTER (WHERE "customerType" = 'NEW')::bigint AS "newCustomers",
+        COALESCE(SUM("arcAmount"), 0)::double precision AS arc,
+        COALESCE(SUM("arcAmount") FILTER (WHERE "isActive"), 0)::double precision AS "activeArc"
+      FROM "Customer"
+      WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
+      GROUP BY 1
+    `,
+    // Commercial changes joined to the customer's SAM + current ARC (churn).
+    prisma.$queryRaw<
+      { sam: string; action: string; oldArc: number | null; newArc: number | null; custArc: number | null }[]
+    >`
+      SELECT
+        c."details"->'sam'->>'samExecutiveName' AS sam,
+        h.action AS action,
+        (h."oldValues"->>'arcAmount')::double precision AS "oldArc",
+        (h."newValues"->>'arcAmount')::double precision AS "newArc",
+        c."arcAmount" AS "custArc"
+      FROM "CustomerHistory" h
+      JOIN "Customer" c ON c.id = h."customerId"
+      WHERE h.action IN ('UPGRADE', 'DOWNGRADE', 'RATE_REVISION', 'DISCONNECTION')
+        AND NULLIF(TRIM(c."details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
+    `,
+  ]);
 
-  const groups = new Map<
-    string,
-    { variants: string[]; customers: number; active: number; arc: number; activeArc: number }
-  >();
-  for (const r of rows) {
-    const key = samKey(r.sam);
-    const g = groups.get(key) ?? { variants: [], customers: 0, active: 0, arc: 0, activeArc: 0 };
+  interface Group {
+    variants: string[];
+    customers: number; active: number; newCustomers: number; arc: number; activeArc: number;
+    upgrade: { count: number; amount: number };
+    downgrade: { count: number; amount: number };
+    rateRevision: { count: number };
+    disconnection: { count: number; amount: number };
+  }
+  const blank = (): Group => ({
+    variants: [], customers: 0, active: 0, newCustomers: 0, arc: 0, activeArc: 0,
+    upgrade: { count: 0, amount: 0 }, downgrade: { count: 0, amount: 0 },
+    rateRevision: { count: 0 }, disconnection: { count: 0, amount: 0 },
+  });
+  const groups = new Map<string, Group>();
+  const get = (sam: string) => {
+    const key = samKey(sam);
+    let g = groups.get(key);
+    if (!g) { g = blank(); groups.set(key, g); }
+    return g;
+  };
+
+  for (const r of custRows) {
+    const g = get(r.sam);
     g.variants.push(r.sam);
     g.customers += Number(r.customers);
     g.active += Number(r.active);
+    g.newCustomers += Number(r.newCustomers);
     g.arc += r.arc;
     g.activeArc += r.activeArc;
-    groups.set(key, g);
+  }
+
+  for (const r of histRows) {
+    const g = get(r.sam);
+    const oldArc = r.oldArc ?? 0;
+    const newArc = r.newArc ?? 0;
+    if (r.action === "UPGRADE") { g.upgrade.count++; g.upgrade.amount += Math.max(0, newArc - oldArc); }
+    else if (r.action === "DOWNGRADE") { g.downgrade.count++; g.downgrade.amount += Math.max(0, oldArc - newArc); }
+    else if (r.action === "RATE_REVISION") { g.rateRevision.count++; }
+    else if (r.action === "DISCONNECTION") { g.disconnection.count++; g.disconnection.amount += r.custArc ?? 0; }
   }
 
   return [...groups.values()]
-    .map((g) => ({ sam: canonicalSam(g.variants), customers: g.customers, active: g.active, arc: g.arc, activeArc: g.activeArc }))
+    .map((g) => ({
+      sam: canonicalSam(g.variants),
+      customers: g.customers, active: g.active, newCustomers: g.newCustomers,
+      arc: g.arc, activeArc: g.activeArc,
+      upgrade: g.upgrade, downgrade: g.downgrade, rateRevision: g.rateRevision, disconnection: g.disconnection,
+    }))
     .sort((a, b) => b.customers - a.customers || a.sam.localeCompare(b.sam));
 }
 
