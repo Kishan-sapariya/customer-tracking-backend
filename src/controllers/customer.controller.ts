@@ -34,6 +34,12 @@ export const sams = asyncHandler(async (_req, res) => {
   res.json({ items });
 });
 
+// GET /api/sams — SAM-wise breakdown (customers + ARC per SAM Executive)
+export const samBreakdown = asyncHandler(async (_req, res) => {
+  const items = await svc.listSamBreakdown();
+  res.json({ items });
+});
+
 // GET /api/changes — commercial-change report (ARC-change audit, all roles)
 const changesQuerySchema = z.object({
   action: z.enum(["UPGRADE", "DOWNGRADE", "RATE_REVISION", "DISCONNECTION"]).optional(),

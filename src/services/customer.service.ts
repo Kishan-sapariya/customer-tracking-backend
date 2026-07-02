@@ -472,6 +472,32 @@ export async function listDistinctSams(): Promise<string[]> {
   return rows.map((r) => r.sam);
 }
 
+// SAM-wise breakdown: for each SAM Executive, how many customers are linked and
+// their total / active ARC. Aggregated in SQL over the JSON path.
+export async function listSamBreakdown() {
+  const rows = await prisma.$queryRaw<
+    { sam: string; customers: bigint; active: bigint; arc: number; activeArc: number }[]
+  >`
+    SELECT
+      "details"->'sam'->>'samExecutiveName' AS sam,
+      COUNT(*)::bigint AS customers,
+      COUNT(*) FILTER (WHERE "isActive")::bigint AS active,
+      COALESCE(SUM("arcAmount"), 0)::double precision AS arc,
+      COALESCE(SUM("arcAmount") FILTER (WHERE "isActive"), 0)::double precision AS "activeArc"
+    FROM "Customer"
+    WHERE NULLIF(TRIM("details"->'sam'->>'samExecutiveName'), '') IS NOT NULL
+    GROUP BY 1
+    ORDER BY customers DESC, sam ASC
+  `;
+  return rows.map((r) => ({
+    sam: r.sam,
+    customers: Number(r.customers),
+    active: Number(r.active),
+    arc: r.arc,
+    activeArc: r.activeArc,
+  }));
+}
+
 export async function getCustomer(id: string) {
   const customer = await prisma.customer.findUnique({
     where: { id },
